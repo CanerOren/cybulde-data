@@ -26,7 +26,7 @@ guard-%:
 	@#$(or ${$*}, $(error $* is not set))
 
 ## Version data
-version_data: up
+version-data: up
 	$(DOCKER_COMPOSE_EXEC) python ./cybulde/version_data.py
 
 ## Starts jupyter lab
