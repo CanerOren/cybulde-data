@@ -29,7 +29,7 @@ def initialize_dvc_storage(dvc_remote_name: str, dvc_remote_url: str) -> None:
         run_shell_command("git add .dvc/config")
         run_shell_command(f"git commit -nm 'Configured remote storage at: {dvc_remote_url}'")
     else:
-        DATA_UTILS_LOGGER.info("DVC storage is already initialized.")
+        DATA_UTILS_LOGGER.info("DVC storage is already initialized...")
 
 
 def commit_to_dvc(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
@@ -48,7 +48,7 @@ def commit_to_dvc(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
 
 def make_new_data_version(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
     try:
-        status = run_shell_command("dvc status {dvc_raw_data_folder}.dvc ")
+        status = run_shell_command(f"dvc status {dvc_raw_data_folder}.dvc ")
         if status == "Data and pipelines are up to date.\n":
             DATA_UTILS_LOGGER.info("Data and pipelines are up to date.")
             return
