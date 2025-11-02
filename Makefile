@@ -1,151 +1,105 @@
-# Make all target .PHONY
-.PHONY: $(shell sed -n -e '/^$$/ { n ; /^[^ .\#][^ ]*:/ { s/:.*$$// ; p ; } ; }' $(MAKEFILE_LIST))
+# ---------- Settings ----------
+SHELL := /usr/bin/env bash
 
-SHELL = /usr/bin/env bash
-USER_NAME = $(shell whoami)
-USER_ID = $(shell id -u)
-HOST_NAME = $(shell hostname)
-
+# Detect old vs new compose CLI
 ifeq (, $(shell which docker-compose))
-	DOCKER_COMPOSE_COMMAND = docker compose
+  DC := docker compose
 else
-	DOCKER_COMPOSE_COMMAND = docker-compose
+  DC := docker-compose
 endif
 
-SERVICE_NAME = app
-CONTAINER_NAME = cybulde-data-container
+SERVICE   ?= app
+CONTAINER ?= cybulde-data-container
 
-DIRS_TO_VALIDATE = cybulde
-DOCKER_COMPOSE_RUN = $(DOCKER_COMPOSE_COMMAND) run --rm $(SERVICE_NAME)
-DOCKER_COMPOSE_EXEC = $(DOCKER_COMPOSE_COMMAND) exec $(SERVICE_NAME) 
+# ---------- Phony ----------
+.PHONY: help up build down restart ps logs sh dvc-install git-bootstrap dvc-bootstrap version-data dvc-status dvc-push dvc-pull
 
-export
-
- # Returns true if the stem is a non-empty environment variable, or else raises an error.
-guard-%:
-	@#$(or ${$*}, $(error $* is not set))
-
-## Version data
-version-data: up
-	$(DOCKER_COMPOSE_EXEC) python ./cybulde/version_data.py
-
-## Starts jupyter lab
-notebook: up
-	$(DOCKER_COMPOSE_EXEC) jupyter-lab --ip 0.0.0.0 --port 8888 --no-browser
-
-## Sort code using isort
-sort: up
-	$(DOCKER_COMPOSE_EXEC) isort --atomic $(DIRS_TO_VALIDATE)
-
-## Check sorting using isort
-sort-check: up
-	$(DOCKER_COMPOSE_EXEC) isort --check-only $(DIRS_TO_VALIDATE)
-
-## Format code using black
-format: up
-	$(DOCKER_COMPOSE_EXEC) black $(DIRS_TO_VALIDATE)
-
-## Check format using black
-format-check: up
-	$(DOCKER_COMPOSE_EXEC) black --check $(DIRS_TO_VALIDATE)
-
-## Format and sort code using black and isort
-format-and-sort: sort format
-
-## Lint code using flake8
-lint: up format-check sort-check
-	$(DOCKER_COMPOSE_EXEC) flake8 $(DIRS_TO_VALIDATE)
-
-## Check type annotations using mypy
-check-type-annotations: up
-	$(DOCKER_COMPOSE_EXEC) mypy $(DIRS_TO_VALIDATE)
-
-## Run tests with pytest
-test: up
-	$(DOCKER_COMPOSE_EXEC) pytest
-
-## Perform a full check
-full-check: lint check-type-annotations 
-	$(DOCKER_COMPOSE_EXEC) pytest --cov --cov-report xml --verbose
-
-## Builds docker images
-build:
-	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME)
-
-## Remove poetry.lock and build docker image
-build-for-dependencies:
-	rm -f *.lock
-	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME)
-
-## Lock dependencies with poetry
-lock-dependencies: build-for-dependencies
-	$(DOCKER_COMPOSE_RUN) bash -c "if [ -e /home/$(USER_NAME)/poetry.lock.build ]; then cp /home/$(USER_NAME)/poetry.lock.build ./poetry.lock; else poetry lock; fi"
-
-## Starts docker containers using "docker-compose- up -d"
-up:
-	$(DOCKER_COMPOSE_COMMAND) up -d
-
-## docker-compose down
-down:
-	$(DOCKER_COMPOSE_COMMAND) down
-
-## Open an interactive shell in docker container
-exec-in: up
-	docker exec -it $(CONTAINER_NAME) bash 
-
-.DEFAULT_GOAL := help
-
-# Inspired by <http://marmelab.com/blog/2016/02/29/auto-documented-makefile.html>
-# sed script explained:
-# /^##/:
-# 	* save line in hold space
-# 	* purge line
-# 	* Loop:
-# 		* append newline + line to hold space
-# 		* go to next line
-# 		* if line starts with doc comment, strip comment character off and loop
-# 	* remove target prerequisites
-# 	* append hold space (+ newline) to line
-# 	* replace newline plus comments by `---`
-# 	* print line
-# Separate expressions are necessary because labels cannot be delimited by
-# semicolon; see <http://stackoverflow.com/a/11799865/1968>
-.PHONY: help
+# ---------- Help ----------
 help:
-	@echo "$$(tput bold)Available rules:$$(tput sgr0)"
-	@echo
-	@sed -n -e "/^## / { \
-		h; \
-		s/.*//; \
-		:doc" \
-		-e "H; \
-		n; \
-		s/^## //; \
-		t doc" \
-		-e "s/:.*//; \
-		G; \
-		s/\\n## /---/; \
-		s/\\n/ /g; \
-		p; \
-	}" ${MAKEFILE_LIST} \
-	| LC_ALL='C' sort --ignore-case \
-	| awk -F '---' \
-		-v ncol=$$(tput cols) \
-		-v indent=36 \
-		-v col_on="$$(tput setaf 6)" \
-		-v col_off="$$(tput sgr0)" \
-	'{ \
-		printf "%s%*s%s ", col_on, -indent, $$1, col_off; \
-		n = split($$2, words, " "); \
-		line_length = ncol - indent; \
-		for (i = 1; i <= n; i++) { \
-			line_length -= length(words[i]) + 1; \
-			if (line_length <= 0) { \
-				line_length = ncol - indent - length(words[i]) - 1; \
-				printf "\n%*s ", -indent, " "; \
-			} \
-			printf "%s ", words[i]; \
-		} \
-		printf "\n"; \
-	}' \
-	| more $(shell test $(shell uname) = Darwin && echo '--no-init --raw-control-chars')
+	@echo ""
+	@echo "Targets:"
+	@echo "  up               - docker compose up -d"
+	@echo "  build            - docker compose build --pull"
+	@echo "  down             - docker compose down"
+	@echo "  restart          - down + up"
+	@echo "  ps               - docker compose ps"
+	@echo "  logs             - docker compose logs --no-color $(SERVICE)"
+	@echo "  sh               - shell içine gir (bash)"
+	@echo "  dvc-install      - container içinde DVC'yi (gs desteğiyle) root olarak kur"
+	@echo "  git-bootstrap    - git kimliği ve safe.directory ayarı"
+	@echo "  dvc-bootstrap    - İlk kurulum koruması: data/raw'ı Git index'inden çıkar + dvc add + commit"
+	@echo "  version-data     - Tüm akış (DVC kur, bootstrap, Python scripti çalıştır)"
+	@echo "  dvc-status       - dvc status data/raw.dvc"
+	@echo "  dvc-push         - dvc push"
+	@echo "  dvc-pull         - dvc pull"
+	@echo ""
+
+# ---------- Docker lifecycle ----------
+up:
+	$(DC) up -d
+
+build:
+	$(DC) build --pull
+
+down:
+	$(DC) down
+
+restart: down up
+
+ps:
+	$(DC) ps
+
+logs:
+	$(DC) logs --no-color $(SERVICE)
+
+sh:
+	$(DC) exec -it $(SERVICE) bash
+
+# ---------- DVC & Git bootstrap ----------
+# DVC'yi root olarak kurar (izin derdi yaşamamak için)
+dvc-install: up
+	$(DC) exec -u 0 $(SERVICE) bash -lc 'pip install -U "dvc[gs]" && dvc --version'
+
+# Git kimliği + safe.directory (WSL2 bind mount'larda kritik)
+git-bootstrap: up
+	$(DC) exec $(SERVICE) bash -lc '\
+	  set -e; \
+	  git config --global user.email "dev@local"; \
+	  git config --global user.name  "dev"; \
+	  git config --global --add safe.directory "$$(pwd)"; \
+	'
+
+# İlk kurulum koruması:
+# - data/raw Git index'inden çıkarılır (dosyalar silinmez)
+# - .dvc yoksa dvc add + commit yapılır
+dvc-bootstrap: up git-bootstrap dvc-install
+	$(DC) exec $(SERVICE) bash -lc '\
+	  set -e; \
+	  if git ls-files --error-unmatch data/raw >/dev/null 2>&1; then \
+	    git rm -r --cached data/raw; \
+	  fi; \
+	  if [ ! -f data/raw.dvc ]; then \
+	    dvc add data/raw; \
+	    git add data/raw.dvc .gitignore; \
+	    git commit -m "Track data/raw with DVC"; \
+	  fi; \
+	'
+
+# ---------- Main flow ----------
+# version_data.py içinde: initialize_dvc(), initialize_dvc_storage(), make_new_data_version()
+#  -> İlk çalıştırma + sonraki güncellemeler: commit + tag + dvc push + git push --tags
+version-data: dvc-bootstrap
+	$(DC) exec $(SERVICE) bash -lc '\
+	  set -e; \
+	  python ./cybulde/version_data.py; \
+	'
+
+# ---------- Convenience ----------
+dvc-status: up
+	$(DC) exec $(SERVICE) bash -lc 'dvc status data/raw.dvc || true'
+
+dvc-push: up
+	$(DC) exec $(SERVICE) bash -lc 'dvc push'
+
+dvc-pull: up
+	$(DC) exec $(SERVICE) bash -lc 'dvc pull'

@@ -13,8 +13,8 @@ services:
         USER_ID: "${USER_ID:-1000}"
     volumes:
       - ./:/app/
-      - ~/.config/gcloud/:/home/${USER_NAME}/.config/gcloud
-      - ~/.ssh:/home/${USER_NAME}/.ssh
+      - ~/.config/gcloud/:/home/${USER_NAME:-caner}/.config/gcloud
+      - ~/.ssh:/home/${USER_NAME:-caner}/.ssh
     ports:
       - 8888:8888
     ipc: host

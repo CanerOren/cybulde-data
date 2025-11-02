@@ -34,23 +34,45 @@ def initialize_dvc_storage(dvc_remote_name: str, dvc_remote_url: str) -> None:
         DATA_UTILS_LOGGER.info("DVC storage was already initialized...")
 
 
+def _ensure_not_tracked_by_git(path: str) -> None:
+    try:
+        run_shell_command(f"git ls-files --error-unmatch {path}")
+        run_shell_command(f"git rm -r --cached {path}")
+    except:
+        pass
+
+
+
 def commit_to_dvc(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
-    current_version = current_version = run_shell_command("git tag --list | sort -t v -k 2 -g | tail -1 | sed 's/v//'").strip()
-    if not current_version:
-        current_version = "0"
-    next_version = f"v{int(current_version)+1}"
+    try:
+        tags = run_shell_command("git tag").strip().splitlines()
+        numbers = [int(t[1:]) for t in tags if t.startswith("v") and t[1:].isdigit()]
+        current = max(numbers) if numbers else 0
+    except Exception:
+        current = 0
+    next_version = f"v{current + 1}"
+
+    _ensure_not_tracked_by_git(dvc_raw_data_folder)
+
     run_shell_command(f"dvc add {dvc_raw_data_folder}")
     run_shell_command("git add .")
-    run_shell_command(f"git commit -nm 'Updated version of the data from v{current_version} to {next_version}'")
-    run_shell_command(f"git tag -a {next_version} -m 'Data version {next_version}'")
-    run_shell_command(f"dvc push {dvc_raw_data_folder}.dvc --remote {dvc_remote_name}")
+    run_shell_command(f"git commit -nm 'Updated data version -> {next_version}'")
+    run_shell_command(f"git tag -a {next_version} -m ''Data version {next_version}'")
+
+    run_shell_command(f"dvc push --remote {dvc_remote_name}")
     run_shell_command("git push --tags")
-    run_shell_command("git push -f --tags")
+
+
 
 def make_new_data_version(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
     try:
         status = run_shell_command(f"dvc status {dvc_raw_data_folder}.dvc")
         if status =="Data and pipelines are up to date.\n":
+            commit_to_dvc(dvc_raw_data_folder, dvc_remote_name)
+            return
+        
+        status = run_shell_command(f"dvc status {dvc_raw_data_folder}.dvc").strip()
+        if "up to date" in status:
             DATA_UTILS_LOGGER.info("Data and pipelines are up to date.")
             return
         commit_to_dvc(dvc_raw_data_folder, dvc_remote_name)
