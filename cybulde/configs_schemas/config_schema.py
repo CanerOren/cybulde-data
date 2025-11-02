@@ -6,7 +6,7 @@ class Config:
     hello: str = "world"
     dvc_remote_name: str = "gcs-storage"
     dvc_remote_url: str = "gs://cybulde_emkademy/data/raw"
-
+    dvc_raw_data_folder: str = "data/raw"
 
 def setup_config() -> None:
     cs = ConfigStore.instance()
