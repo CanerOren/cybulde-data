@@ -49,7 +49,7 @@ RUN chown -R ${USER_NAME} /*.sh && chmod +x /*.sh
 USER ${USER_NAME}
 
 RUN git config --global user.email "canerorenn@gmail.com" \
-    && git config --global user.name "CanerOren"
+    && git config --global user.name "Caner Oren"
 
 COPY . /app/
 CMD ["/startup-script.sh"]
