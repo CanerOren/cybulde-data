@@ -50,6 +50,7 @@ install_types= true
 non_interactive = true
 follow_imports = "silent"
 no_strict_optional = true
+exclude = "(^config_schema\\.py$)"
 
 warn_redundant_casts = false
 warn_unused_ignores = true
