@@ -49,7 +49,7 @@ ignore_missing_imports = true
 install_types= true
 non_interactive = true
 follow_imports = "silent"
-no_strict_optional = truec
+no_strict_optional = true
 
 warn_redundant_casts = false
 warn_unused_ignores = true
