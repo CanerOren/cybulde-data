@@ -1,140 +1,233 @@
-# ---------- Settings ----------
-SHELL := /usr/bin/env bash
+# Make all targets .PHONY
+.PHONY: $(shell sed -n -e '/^$$/ { n ; /^[^ .\#][^ ]*:/ { s/:.*$$// ; p ; } ; }' $(MAKEFILE_LIST))
 
-# Detect old vs new compose CLI
+SHELL = /usr/bin/env bash
+USER_NAME = $(shell whoami)
+USER_ID = $(shell id -u)
+HOST_NAME = $(shell hostname)
+
 ifeq (, $(shell which docker-compose))
-  DC := docker compose
+	DOCKER_COMPOSE_COMMAND = docker compose
 else
-  DC := docker-compose
+	DOCKER_COMPOSE_COMMAND = docker-compose
 endif
 
-SERVICE   ?= app
-CONTAINER ?= cybulde-data-container
+SERVICE_NAME   = app
+CONTAINER_NAME = cybulde-data-container
 
-# Git kimliği/remote için env'den beslenelim (.env dosyasına koyabilirsin)
+# Compose helpers
+DOCKER_COMPOSE_RUN  = $(DOCKER_COMPOSE_COMMAND) run --rm $(SERVICE_NAME)
+DOCKER_COMPOSE_EXEC = $(DOCKER_COMPOSE_COMMAND) exec $(SERVICE_NAME)
+DOCKER_COMPOSE_EXEC_ROOT = $(DOCKER_COMPOSE_COMMAND) exec -u 0 $(SERVICE_NAME)
+
+# Project dirs
+DIRS_TO_VALIDATE = cybulde
+
+# --- Git/DVC config (env ile override edilebilir) ---
 GIT_USER_NAME      ?=
 GIT_USER_EMAIL     ?=
 GIT_REMOTE_URL     ?=
 GIT_DEFAULT_BRANCH ?= main
 
-# ---------- Phony ----------
-.PHONY: help up build down restart ps logs sh dvc-install git-bootstrap git-ssh-bootstrap git-remote-bootstrap dvc-bootstrap version-data dvc-status dvc-push dvc-pull
+DVC_REMOTE_NAME ?= gcs-storage
+DVC_RAW_DIR     ?= data/raw
 
-# ---------- Help ----------
-help:
-	@echo ""
-	@echo "Targets:"
-	@echo "  up                   - docker compose up -d"
-	@echo "  build                - docker compose build --pull"
-	@echo "  down                 - docker compose down"
-	@echo "  restart              - down + up"
-	@echo "  ps                   - docker compose ps"
-	@echo "  logs                 - docker compose logs --no-color $(SERVICE)"
-	@echo "  sh                   - shell içine gir (bash)"
-	@echo "  dvc-install          - container içinde DVC'yi (gs desteğiyle) root olarak kur"
-	@echo "  git-ssh-bootstrap    - SSH known_hosts ve izinleri hazırla (GitHub için)"
-	@echo "  git-bootstrap        - repo-local git user.name/email + safe.directory"
-	@echo "  git-remote-bootstrap - origin ve upstream ayarla (GIT_REMOTE_URL gerekir)"
-	@echo "  dvc-bootstrap        - İlk kurulum: data/raw'ı Git index'inden çıkar + dvc add + commit (yoksa)"
-	@echo "  version-data         - Tüm akış (DVC kur, git bootstrap, python scripti, garanti push)"
-	@echo "  dvc-status           - dvc status data/raw.dvc"
-	@echo "  dvc-push             - dvc push"
-	@echo "  dvc-pull             - dvc pull"
-	@echo ""
+export
 
-# ---------- Docker lifecycle ----------
-up:
-	$(DC) up -d
+# Returns true if the stem is a non-empty environment variable, or else raises an error.
+guard-%:
+	@#$(or ${$*}, $(error $* is not set))
 
+## Version data  (ENHANCED: dvc install/bootstrap + push)
+version-data: up dvc-install git-ssh-bootstrap git-bootstrap git-remote-bootstrap dvc-bootstrap
+	$(DOCKER_COMPOSE_EXEC) python ./cybulde/version_data.py
+	# Garantici: script zaten push ediyor ama uzak kesin dolsun:
+	-$(DOCKER_COMPOSE_EXEC) dvc push --remote $(DVC_REMOTE_NAME)
+	-$(DOCKER_COMPOSE_EXEC) git push --follow-tags
+
+## Starts jupyter lab
+notebook: up
+	$(DOCKER_COMPOSE_EXEC) jupyter-lab --ip 0.0.0.0 --port 8888 --no-browser
+
+## Sort code using isort
+sort: up
+	$(DOCKER_COMPOSE_EXEC) isort --atomic $(DIRS_TO_VALIDATE)
+
+## Check sorting using isort
+sort-check: up
+	$(DOCKER_COMPOSE_EXEC) isort --check-only --atomic $(DIRS_TO_VALIDATE)
+
+## Format code using black
+format: up
+	$(DOCKER_COMPOSE_EXEC) black $(DIRS_TO_VALIDATE)
+
+## Check format using black
+format-check: up
+	$(DOCKER_COMPOSE_EXEC) black --check $(DIRS_TO_VALIDATE)
+
+## Format and sort code using black and isort
+format-and-sort: sort format
+
+## Lint code using flake8
+lint: up format-check sort-check
+	$(DOCKER_COMPOSE_EXEC) flake8 $(DIRS_TO_VALIDATE)
+
+## Check type annotations using mypy
+check-type-annotations: up
+	$(DOCKER_COMPOSE_EXEC) mypy $(DIRS_TO_VALIDATE)
+
+## Run tests with pytest
+test: up
+	$(DOCKER_COMPOSE_EXEC) pytest
+
+## Perform a full check
+full-check: lint check-type-annotations
+	$(DOCKER_COMPOSE_EXEC) pytesta --cov --cov-report xml --verbose
+
+## Builds docker image
 build:
-	$(DC) build --pull
+	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME)
 
+## Remove poetry.lock and build docker image
+build-for-dependencies:
+	rm -f *.lock
+	$(DOCKER_COMPOSE_COMMAND) build $(SERVICE_NAME)
+
+## Lock dependencies with poetry
+lock-dependencies: build-for-dependencies
+	$(DOCKER_COMPOSE_RUN) bash -c "if [ -e /home/$(USER_NAME)/poetry.lock.build ]; then cp /home/$(USER_NAME)/poetry.lock.build ./poetry.lock; else poetry lock; fi"
+
+## Starts docker containers using "docker-compose up -d"
+up:
+	$(DOCKER_COMPOSE_COMMAND) up -d
+
+## docker-compose down
 down:
-	$(DC) down
+	$(DOCKER_COMPOSE_COMMAND) down
 
-restart: down up
+## Open an interactive shell in docker container
+exec-in: up
+	docker exec -it $(CONTAINER_NAME) bash
 
-ps:
-	$(DC) ps
+# -------------------- NEW: Git & DVC utilities --------------------
 
-logs:
-	$(DC) logs --no-color $(SERVICE)
-
-sh:
-	$(DC) exec -it $(SERVICE) bash
-
-# ---------- DVC & Git bootstrap ----------
-# DVC'yi root olarak kurar (izin derdi yaşamamak için)
+## Install/ensure DVC in container (root pip fallback)
 dvc-install: up
-	$(DC) exec -u 0 $(SERVICE) bash -lc 'pip install -U "dvc[gs]" && dvc --version'
+	@# varsa sürümünü göster; yoksa root pip ile kur
+	$(DOCKER_COMPOSE_EXEC) sh -lc 'command -v dvc >/dev/null 2>&1 && dvc --version || exit 1' \
+	|| $(DOCKER_COMPOSE_EXEC_ROOT) bash -lc 'pip install -U "dvc[gs]" && dvc --version'
 
-# SSH (opsiyonel ama önerilir): known_hosts ve izinler
+## Add github.com to known_hosts (SSH push için önerilir)
 git-ssh-bootstrap: up
-	$(DC) exec $(SERVICE) bash -lc '\
+	$(DOCKER_COMPOSE_EXEC) bash -lc '\
 	  set -e; \
 	  mkdir -p $$HOME/.ssh; chmod 700 $$HOME/.ssh; \
 	  touch $$HOME/.ssh/known_hosts; chmod 644 $$HOME/.ssh/known_hosts; \
 	  command -v ssh-keyscan >/dev/null 2>&1 && ssh-keyscan -H github.com >> $$HOME/.ssh/known_hosts 2>/dev/null || true; \
 	'
 
-# Repo-local kimlik ve safe.directory
+## Repo-local git kimliği + safe.directory (env ile override)
 git-bootstrap: up
-	@# Kimlik env ile geldiyse repo-local ayarla; gelmediyse mevcut ayarlara dokunma
-	$(DC) exec -e GIT_USER_NAME='$(GIT_USER_NAME)' -e GIT_USER_EMAIL='$(GIT_USER_EMAIL)' $(SERVICE) bash -lc '\
+	$(DOCKER_COMPOSE_EXEC) bash -lc '\
 	  set -e; \
-	  if [ -n "$$GIT_USER_EMAIL" ]; then git config --local user.email "$$GIT_USER_EMAIL"; fi; \
-	  if [ -n "$$GIT_USER_NAME"  ]; then git config --local user.name  "$$GIT_USER_NAME";  fi; \
+	  if [ -n "$(GIT_USER_EMAIL)" ]; then git config --local user.email "$(GIT_USER_EMAIL)"; fi; \
+	  if [ -n "$(GIT_USER_NAME)"  ]; then git config --local user.name  "$(GIT_USER_NAME)";  fi; \
 	  git config --global --add safe.directory "$$(pwd)"; \
-	  echo "git user: $$(git config --local user.name 2>/dev/null || echo '-') <$$(git config --local user.email 2>/dev/null || echo '-')>"; \
+	  echo "git user: $$(git config --local user.name 2>/dev/null || echo '-') <$$([ -n "$(GIT_USER_EMAIL)" ] && echo "$(GIT_USER_EMAIL)" || git config --local user.email 2>/dev/null || echo '-')>"; \
 	'
 
-# origin ve upstream ayarlama (HTTPS token veya SSH URL kullan)
+## origin/upstream ayarla (GIT_REMOTE_URL gerekebilir)
 git-remote-bootstrap: up
-	$(DC) exec -e GIT_REMOTE_URL='$(GIT_REMOTE_URL)' -e GIT_DEFAULT_BRANCH='$(GIT_DEFAULT_BRANCH)' $(SERVICE) bash -lc '\
+	$(DOCKER_COMPOSE_EXEC) bash -lc '\
 	  set -e; \
 	  if ! git remote | grep -q "^origin$$"; then \
-	    test -n "$$GIT_REMOTE_URL" || (echo "ERROR: Set GIT_REMOTE_URL in .env (e.g. git@github.com:user/repo.git)"; exit 1); \
-	    git remote add origin "$$GIT_REMOTE_URL"; \
+	    [ -n "$(GIT_REMOTE_URL)" ] || { echo "WARN: GIT_REMOTE_URL boş; origin var sayılıyor."; exit 0; }; \
+	    git remote add origin "$(GIT_REMOTE_URL)"; \
 	  fi; \
-	  default_branch=$${GIT_DEFAULT_BRANCH:-main}; \
+	  default_branch="$(GIT_DEFAULT_BRANCH)"; \
 	  git branch -M "$$default_branch"; \
-	  # upstream yoksa ilk push sırasında ayarla (varsa no-op olabilir) \
 	  git push -u origin "$$default_branch" || true; \
 	'
 
-# İlk kurulum koruması:
-# - data/raw Git index'inden çıkarılır (dosyalar silinmez)
-# - .dvc yoksa dvc add + commit yapılır
+## İlk kurulum: data/raw Git index’inden çıkar + .dvc yoksa ekle/commit
 dvc-bootstrap: up dvc-install
-	$(DC) exec $(SERVICE) bash -lc '\
+	$(DOCKER_COMPOSE_EXEC) bash -lc '\
 	  set -e; \
-	  if git ls-files --error-unmatch data/raw >/dev/null 2>&1; then \
-	    git rm -r --cached data/raw; \
+	  if git ls-files --error-unmatch $(DVC_RAW_DIR) >/dev/null 2>&1; then \
+	    git rm -r --cached $(DVC_RAW_DIR); \
 	  fi; \
-	  if [ ! -f data/raw.dvc ]; then \
-	    dvc add data/raw; \
-	    git add data/raw.dvc .gitignore; \
-	    git commit -m "Track data/raw with DVC"; \
+	  if [ ! -f $(DVC_RAW_DIR).dvc ]; then \
+	    dvc add $(DVC_RAW_DIR); \
+	    git add $(DVC_RAW_DIR).dvc .gitignore; \
+	    git commit -m "Track $(DVC_RAW_DIR) with DVC" || true; \
 	  fi; \
 	'
 
-# ---------- Main flow ----------
-# version_data.py: initialize_dvc(), initialize_dvc_storage(), make_new_data_version()
-#  -> İlk çalıştırma + sonraki güncellemeler: commit + tag + dvc push + git push (follow-tags)
-version-data: git-ssh-bootstrap git-bootstrap git-remote-bootstrap dvc-bootstrap
-	$(DC) exec $(SERVICE) bash -lc '\
-	  set -e; \
-	  python ./cybulde/version_data.py; \
-	  # script zaten push ediyor; yine de ekstra güven için: \
-	  git push --follow-tags || true; \
-	'
-
-# ---------- Convenience ----------
+## dvc status helper
 dvc-status: up
-	$(DC) exec $(SERVICE) bash -lc 'dvc status data/raw.dvc || true'
+	-$(DOCKER_COMPOSE_EXEC) dvc status $(DVC_RAW_DIR).dvc
 
+## dvc push helper
 dvc-push: up
-	$(DC) exec $(SERVICE) bash -lc 'dvc push'
+	$(DOCKER_COMPOSE_EXEC) dvc push --remote $(DVC_REMOTE_NAME)
 
+## dvc pull helper
 dvc-pull: up
-	$(DC) exec $(SERVICE) bash -lc 'dvc pull'
+	$(DOCKER_COMPOSE_EXEC) dvc pull --remote $(DVC_REMOTE_NAME)
+
+.DEFAULT_GOAL := help
+
+# Inspired by <http://marmelab.com/blog/2016/02/29/auto-documented-makefile.html>
+# sed script explained:
+# /^##/:
+# 	* save line in hold space
+# 	* purge line
+# 	* Loop:
+# 		* append newline + line to hold space
+# 		* go to next line
+# 		* if line starts with doc comment, strip comment character off and loop
+# 	* remove target prerequisites
+# 	* append hold space (+ newline) to line
+# 	* replace newline plus comments by `---`
+# 	* print line
+# Separate expressions are necessary because labels cannot be delimited by
+# semicolon; see <http://stackoverflow.com/a/11799865/1968>
+.PHONY: help
+help:
+	@echo "$$(tput bold)Available rules:$$(tput sgr0)"
+	@echo
+	@sed -n -e "/^## / { \
+		h; \
+		s/.*//; \
+		:doc" \
+		-e "H; \
+		n; \
+		s/^## //; \
+		t doc" \
+		-e "s/:.*//; \
+		G; \
+		s/\\n## /---/; \
+		s/\\n/ /g; \
+		p; \
+	}" ${MAKEFILE_LIST} \
+	| LC_ALL='C' sort --ignore-case \
+	| awk -F '---' \
+		-v ncol=$$(tput cols) \
+		-v indent=36 \
+		-v col_on="$$(tput setaf 6)" \
+		-v col_off="$$(tput sgr0)" \
+	'{ \
+		printf "%s%*s%s ", col_on, -indent, $$1, col_off; \
+		n = split($$2, words, " "); \
+		line_length = ncol - indent; \
+		for (i = 1; i <= n; i++) { \
+			line_length -= length(words[i]) + 1; \
+			if (line_length <= 0) { \
+				line_length = ncol - indent - length(words[i]) - 1; \
+				printf "\n%*s ", -indent, " "; \
+			} \
+			printf "%s ", words[i]; \
+		} \
+		printf "\n"; \
+	}' \
+	| more $(shell test $(shell uname) = Darwin && echo '--no-init --raw-control-chars')
