@@ -1,4 +1,4 @@
-from cybulde.configs_schemas.config_schema import * 
+from cybulde.configs_schemas.config_schema import Config
 from cybulde.utils.config_utils import get_config
 from cybulde.utils.data_utils import initialize_dvc, initialize_dvc_storage, make_new_data_version
 
