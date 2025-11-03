@@ -45,10 +45,10 @@ sections= ["FUTURE","STDLIB","THIRDPARTY","FIRSTPARTY","LOCALFOLDER"]
 
 [tool.mypy]
 python_version = "3.12"
-# Sadece paketini tara:
 files = ["cybulde"]
 exclude = "(^config_schema\\.py$)"
 ignore_missing_imports = true
+explicit_package_bases = true
 
 warn_redundant_casts = false
 warn_unused_ignores = true
