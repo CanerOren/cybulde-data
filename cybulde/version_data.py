@@ -1,10 +1,10 @@
-from cybulde.configs_schemas.config_schema import Config
+from cybulde.configs_schemas import config_schema
 from cybulde.utils.config_utils import get_config
 from cybulde.utils.data_utils import initialize_dvc, initialize_dvc_storage, make_new_data_version
 
 
 @get_config(config_path="../configs", config_name="config")
-def version_data(config: Config) -> None:
+def version_data(config: config_schema.Config) -> None:
     initialize_dvc()
 
     initialize_dvc_storage(config.dvc_remote_name, config.dvc_remote_url)
