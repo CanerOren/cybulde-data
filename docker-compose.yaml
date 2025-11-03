@@ -15,7 +15,9 @@ services:
       - ./:/app/
       - ~/.config/gcloud/:/home/${USER_NAME:-caner}/.config/gcloud
       - ~/.ssh:/home/${USER_NAME:-caner}/.ssh
+      - ./docker/scripts/startup-script.sh:/startup-script.sh:ro
     ports:
       - 8888:8888
     ipc: host
     init: true
+    command: ["/bin/bash","-lc","/startup-script.sh"]   

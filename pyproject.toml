@@ -20,6 +20,7 @@ black= "*"
 isort= "*"
 flake8= "*"
 mypy= "*"
+types-pyyaml = "^6.0.12.20250915"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -44,12 +45,10 @@ sections= ["FUTURE","STDLIB","THIRDPARTY","FIRSTPARTY","LOCALFOLDER"]
 
 [tool.mypy]
 python_version = "3.12"
-show_error_codes = true
+# Sadece paketini tara:
+files = ["cybulde"]
+exclude = "(^config_schema\\.py$)"
 ignore_missing_imports = true
-install_types= true
-non_interactive = true
-follow_imports = "silent"
-no_strict_optional = true
 
 warn_redundant_casts = false
 warn_unused_ignores = true
