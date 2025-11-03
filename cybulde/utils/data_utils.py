@@ -1,8 +1,7 @@
-
-from cybulde.utils.utils import get_logger, run_shell_command
 from pathlib import Path
 from subprocess import CalledProcessError
 
+from cybulde.utils.utils import get_logger, run_shell_command
 
 DATA_UTILS_LOGGER = get_logger(Path(__file__).name)
 
@@ -15,7 +14,7 @@ def initialize_dvc() -> None:
     if is_dvc_initialized():
         DATA_UTILS_LOGGER.info("DVC is already initialized.")
         return
-    
+
     DATA_UTILS_LOGGER.info("Initializing DVC")
     run_shell_command("dvc init")
     run_shell_command("dvc config core.analytics false")
@@ -37,10 +36,10 @@ def initialize_dvc_storage(dvc_remote_name: str, dvc_remote_url: str) -> None:
 def _ensure_not_tracked_by_git(path: str) -> None:
     try:
         run_shell_command(f"git ls-files --error-unmatch {path}")
+    except RuntimeError:
+        return
+    else:
         run_shell_command(f"git rm -r --cached {path}")
-    except:
-        pass
-
 
 
 def commit_to_dvc(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
@@ -63,14 +62,13 @@ def commit_to_dvc(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
     run_shell_command("git push --tags")
 
 
-
 def make_new_data_version(dvc_raw_data_folder: str, dvc_remote_name: str) -> None:
     try:
         status = run_shell_command(f"dvc status {dvc_raw_data_folder}.dvc")
-        if status =="Data and pipelines are up to date.\n":
+        if status == "Data and pipelines are up to date.\n":
             commit_to_dvc(dvc_raw_data_folder, dvc_remote_name)
             return
-        
+
         status = run_shell_command(f"dvc status {dvc_raw_data_folder}.dvc").strip()
         if "up to date" in status:
             DATA_UTILS_LOGGER.info("Data and pipelines are up to date.")

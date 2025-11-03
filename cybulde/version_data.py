@@ -13,4 +13,4 @@ def version_data(config: Config) -> None:
 
 
 if __name__ == "__main__":
-    version_data() # type: ignore
+    version_data()  # type: ignore
