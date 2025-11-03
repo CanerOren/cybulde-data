@@ -9,7 +9,7 @@ import yaml
 from hydra.types import TaskFunction
 from omegaconf import DictConfig, OmegaConf
 
-from cybulde.configs_schemas import config_schema
+from cybulde.configs_schemas.config_schema import setup_config as _schema_setup_config
 
 
 def get_config(config_path: str, config_name: str) -> TaskFunction:
@@ -28,7 +28,7 @@ def get_config(config_path: str, config_name: str) -> TaskFunction:
 
 
 def setup_config() -> None:
-    config_schema.setup_config()
+        _schema_setup_config()
 
 
 def setup_logger() -> None:
